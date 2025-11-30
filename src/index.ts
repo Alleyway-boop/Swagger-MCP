@@ -10,12 +10,18 @@ import {
 import logger from "./utils/logger.js";
 
 // Import tool definitions and handlers
-import { toolDefinitions, 
+import { toolDefinitions,
   handleGetSwaggerDefinition,
   handleListEndpoints,
   handleListEndpointModels,
   handleGenerateModelCode,
-  handleGenerateEndpointToolCode
+  handleGenerateEndpointToolCode,
+  handleDynamicSwaggerConfig,
+  handleSearchSwaggerEndpoints,
+  handleGetEndpointDetails,
+  handleGetSessionStats,
+  handleClearCache,
+  handleGetSearchSuggestions
 } from "./tools/index.js";
 
 // Import prompt definitions and handlers
@@ -24,9 +30,8 @@ import { promptDefinitions, promptHandlers } from "./prompts/index.js";
 // Create MCP server
 const server = new Server(
   {
-    name: 'Swagger MCP Server',
-    description: 'A server that helps you build a MCP wrapper around your Swagger API',
-    version: '1.0.0',
+    name: 'Improved Swagger MCP Server',
+    version: '2.0.0',
   },
   {
     capabilities: {
@@ -112,21 +117,41 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const input = request.params.arguments;
     
     switch (name) {
+      // Original tools
       case "getSwaggerDefinition":
         return await handleGetSwaggerDefinition(input);
-      
+
       case "listEndpoints":
         return await handleListEndpoints(input);
-      
+
       case "listEndpointModels":
         return await handleListEndpointModels(input);
-      
+
       case "generateModelCode":
         return await handleGenerateModelCode(input);
-      
+
       case "generateEndpointToolCode":
         return await handleGenerateEndpointToolCode(input);
-      
+
+      // New improved tools
+      case "configure_swagger_session":
+        return await handleDynamicSwaggerConfig(input);
+
+      case "search_swagger_endpoints":
+        return await handleSearchSwaggerEndpoints(input);
+
+      case "get_endpoint_details":
+        return await handleGetEndpointDetails(input);
+
+      case "get_session_stats":
+        return await handleGetSessionStats(input);
+
+      case "clear_swagger_cache":
+        return await handleClearCache(input);
+
+      case "get_search_suggestions":
+        return await handleGetSearchSuggestions(input);
+
       default:
         return {
           content: [{

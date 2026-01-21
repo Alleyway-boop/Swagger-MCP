@@ -1,7 +1,7 @@
 /**
  * Tools index file
  * Exports all tool definitions and implementations
- * Includes both original and new improved tools
+ * Includes original tools, improved tools, adapters, and unified tool
  */
 
 import { getSwaggerDefinition } from './getSwaggerDefinition.js';
@@ -23,7 +23,15 @@ import {
   handleGetSearchSuggestions
 } from './sessionManagement.js';
 
-// Original tool definitions array
+// Adapters and unified tool
+import { unifiedSwaggerTool, handleUnifiedSwagger } from './unifiedSwaggerTool.js';
+import {
+  handleGetSwaggerDefinitionAdapter,
+  handleListEndpointsAdapter,
+  handleListEndpointModelsAdapter
+} from './adapters/index.js';
+
+// Original tool definitions array (kept for backward compatibility)
 export const originalToolDefinitions = [
   getSwaggerDefinition,
   listEndpoints,
@@ -42,13 +50,17 @@ export const improvedToolDefinitions = [
   getSearchSuggestionsTool
 ];
 
-// All tool definitions (both original and improved)
+// Unified tool definition (recommended for new usage)
+export const unifiedToolDefinition = unifiedSwaggerTool;
+
+// All tool definitions (original, improved, and unified)
 export const toolDefinitions = [
   ...originalToolDefinitions,
-  ...improvedToolDefinitions
+  ...improvedToolDefinitions,
+  unifiedSwaggerTool  // Add unified tool to the list
 ];
 
-// Export original tool handlers
+// Export original tool handlers (for backward compatibility)
 export { handleGetSwaggerDefinition } from './getSwaggerDefinition.js';
 export { handleListEndpoints } from './listEndpoints.js';
 export { handleListEndpointModels } from './listEndpointModels.js';
@@ -64,3 +76,13 @@ export {
   handleClearCache,
   handleGetSearchSuggestions
 };
+
+// Export adapter handlers (internal use)
+export {
+  handleGetSwaggerDefinitionAdapter,
+  handleListEndpointsAdapter,
+  handleListEndpointModelsAdapter
+};
+
+// Export unified tool handler
+export { handleUnifiedSwagger };

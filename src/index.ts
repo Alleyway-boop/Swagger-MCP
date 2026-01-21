@@ -21,7 +21,8 @@ import { toolDefinitions,
   handleGetEndpointDetails,
   handleGetSessionStats,
   handleClearCache,
-  handleGetSearchSuggestions
+  handleGetSearchSuggestions,
+  handleUnifiedSwagger  // NEW: unified tool handler
 } from "./tools/index.js";
 
 // Import prompt definitions and handlers
@@ -151,6 +152,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_search_suggestions":
         return await handleGetSearchSuggestions(input);
+
+      // NEW: Unified tool (recommended for new usage)
+      case "swagger_explorer":
+        return await handleUnifiedSwagger(input);
 
       default:
         return {

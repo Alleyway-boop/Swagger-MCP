@@ -22,9 +22,28 @@ export interface SwaggerMetadata {
   definitions?: Record<string, any>; // Swagger 2.0
 }
 
+/**
+ * Document metadata for intelligent cache updates
+ */
+export interface DocumentMetadata {
+  etag?: string;
+  lastModified?: string;
+  contentHash: string;
+  downloadedAt: number;
+  expiresAt: number;
+}
+
+/**
+ * Enhanced index with timestamp support
+ */
+export interface TimestampedAPIIndex extends APIIndex {
+  timestamp?: number;
+}
+
 export class IndexedSwaggerLoader {
-  private indexCache = new Map<string, APIIndex>();
+  private indexCache = new Map<string, TimestampedAPIIndex>();
   private metadataCache = new Map<string, SwaggerMetadata>();
+  private documentMetadataCache = new Map<string, DocumentMetadata>();
   private cacheDir: string;
 
   constructor(cacheDir: string = '.swagger-cache') {
@@ -53,15 +72,21 @@ export class IndexedSwaggerLoader {
     const startTime = Date.now();
 
     try {
-      // Load only essential metadata
-      const metadata = await this.loadMetadata(swaggerUrl, customHeaders);
+      // Load only essential metadata with ETag/Last-Modified capture
+      const { metadata, docMetadata } = await this.loadMetadata(swaggerUrl, customHeaders);
+
+      // Store metadata and document metadata
       this.metadataCache.set(indexKey, metadata);
+      this.documentMetadataCache.set(indexKey, docMetadata);
 
       // Build lightweight index
       const index = this.buildLightweightIndex(metadata, swaggerUrl);
 
+      // Add timestamp to index
+      (index as TimestampedAPIIndex).timestamp = Date.now();
+
       // Cache the index
-      this.indexCache.set(indexKey, index);
+      this.indexCache.set(indexKey, index as TimestampedAPIIndex);
 
       // Persist to disk
       await this.persistIndex(indexKey, index);
@@ -69,7 +94,9 @@ export class IndexedSwaggerLoader {
       const duration = Date.now() - startTime;
       logger.info(`Index created for ${swaggerUrl} in ${duration}ms`, {
         totalEndpoints: index.metadata.totalEndpoints,
-        tags: index.metadata.tags.length
+        tags: index.metadata.tags.length,
+        etag: docMetadata.etag || 'none',
+        lastModified: docMetadata.lastModified || 'none'
       });
 
       return index;
@@ -116,20 +143,19 @@ export class IndexedSwaggerLoader {
   }
 
   /**
-   * Load only metadata (not full document)
+   * Load only metadata (not full document) with ETag/Last-Modified capture
    */
   private async loadMetadata(
     swaggerUrl: string,
     customHeaders?: Record<string, string>
-  ): Promise<SwaggerMetadata> {
+  ): Promise<{ metadata: SwaggerMetadata; docMetadata: DocumentMetadata }> {
     try {
       const response = await axios.get(swaggerUrl, {
         headers: {
-          'User-Agent': 'Swagger-MCP-Indexed/1.0.0',
+          'User-Agent': 'Swagger-MCP-Indexed/2.0.0',
           ...customHeaders
         },
         timeout: 30000,
-        // Use range requests if possible to limit data transfer
         maxRedirects: 5
       });
 
@@ -140,13 +166,33 @@ export class IndexedSwaggerLoader {
         throw new Error('Invalid Swagger/OpenAPI document');
       }
 
-      return {
+      // Capture ETag and Last-Modified headers
+      const etag = response.headers['etag'] as string | undefined;
+      const lastModified = response.headers['last-modified'] as string | undefined;
+
+      // Calculate content hash for integrity verification
+      const contentHash = crypto
+        .createHash('sha256')
+        .update(JSON.stringify(data))
+        .digest('hex');
+
+      const docMetadata: DocumentMetadata = {
+        etag,
+        lastModified,
+        contentHash,
+        downloadedAt: Date.now(),
+        expiresAt: Date.now() + (30 * 60 * 1000) // 30 minutes default
+      };
+
+      const swaggerMetadata: SwaggerMetadata = {
         info: data.info,
         servers: data.servers,
         paths: data.paths || {},
         components: data.components,
         definitions: data.definitions
       };
+
+      return { metadata: swaggerMetadata, docMetadata };
     } catch (error) {
       if (axios.isAxiosError(error)) {
         throw new Error(`Failed to fetch Swagger document: ${error.message}`);
@@ -347,12 +393,101 @@ export class IndexedSwaggerLoader {
   }
 
   /**
-   * Check if index is expired
+   * Check if index is expired using timestamp
    */
-  private isIndexExpired(index: APIIndex): boolean {
-    // For now, consider indices valid for 1 hour
-    // In a real implementation, you'd store creation time
-    return false;
+  private isIndexExpired(index: TimestampedAPIIndex): boolean {
+    if (!index.timestamp) return true;
+    // Default TTL: 30 minutes
+    const ttl = 30 * 60 * 1000;
+    return Date.now() - index.timestamp > ttl;
+  }
+
+  /**
+   * Check if document needs refresh using ETag/Last-Modified
+   */
+  async needsRefresh(swaggerUrl: string, sessionId: string): Promise<boolean> {
+    const indexKey = this.generateIndexKey(swaggerUrl, sessionId);
+    const cached = this.indexCache.get(indexKey);
+    const docMeta = this.documentMetadataCache.get(indexKey);
+
+    // No cache available, needs refresh
+    if (!cached || !docMeta) {
+      return true;
+    }
+
+    // Check TTL expiration
+    if (Date.now() > docMeta.expiresAt) {
+      return true;
+    }
+
+    // Try conditional request to check if document changed
+    try {
+      const headers: Record<string, string> = {
+        'User-Agent': 'Swagger-MCP-Indexed/2.0.0'
+      };
+
+      if (docMeta.etag) {
+        headers['If-None-Match'] = docMeta.etag;
+      }
+      if (docMeta.lastModified) {
+        headers['If-Modified-Since'] = docMeta.lastModified;
+      }
+
+      const response = await axios.head(swaggerUrl, {
+        headers,
+        timeout: 10000,
+        maxRedirects: 5
+      });
+
+      // 304 Not Modified means cache is still valid
+      if (response.status === 304) {
+        // Update expiration time
+        docMeta.expiresAt = Date.now() + (30 * 60 * 1000); // 30 minutes
+        logger.debug(`Document not modified for ${swaggerUrl}`);
+        return false;
+      }
+
+      // Any other status means document may have changed
+      return response.status !== 304;
+    } catch (error) {
+      // On error, assume refresh is needed but log warning
+      if (axios.isAxiosError(error)) {
+        logger.warn(`Failed to check refresh status for ${swaggerUrl}: ${error.message}`);
+      }
+      return true;
+    }
+  }
+
+  /**
+   * Load with automatic refresh based on ETag/Last-Modified
+   */
+  async loadWithAutoRefresh(
+    swaggerUrl: string,
+    sessionId: string,
+    customHeaders?: Record<string, string>
+  ): Promise<APIIndex> {
+    const needsUpdate = await this.needsRefresh(swaggerUrl, sessionId);
+
+    if (!needsUpdate) {
+      const indexKey = this.generateIndexKey(swaggerUrl, sessionId);
+      const cached = this.indexCache.get(indexKey);
+      if (cached) {
+        logger.debug(`Using cached index for ${swaggerUrl} (auto-refresh check passed)`);
+        return cached;
+      }
+    }
+
+    // Need to refresh or no cache available
+    logger.info(`Refreshing ${swaggerUrl} - document changed or cache expired`);
+    return await this.createIncrementalIndex(swaggerUrl, sessionId, customHeaders);
+  }
+
+  /**
+   * Get document metadata for a cached URL
+   */
+  getDocumentMetadata(swaggerUrl: string, sessionId: string): DocumentMetadata | null {
+    const indexKey = this.generateIndexKey(swaggerUrl, sessionId);
+    return this.documentMetadataCache.get(indexKey) || null;
   }
 
   /**

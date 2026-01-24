@@ -39,10 +39,10 @@ const tsTests: string[] = [
 for (let i = 0; i < jsTests.length; i++) {
   const test = jsTests[i];
   console.log(`\n${i + 1}. Running ${test}...`);
-  
+
   try {
     const { execSync } = await import('child_process');
-    execSync(`node R:\\Development\\Projects\\swagger-mcp\\tests\\${test}`, { stdio: 'inherit' });
+    execSync(`node ${path.join(__dirname, test)}`, { stdio: 'inherit' });
     console.log(`\n✅ ${test} completed successfully.`);
   } catch (error: any) {
     console.log(`\n❌ ${test} failed with error: ${error.message}`);
@@ -53,10 +53,10 @@ for (let i = 0; i < jsTests.length; i++) {
 for (let i = 0; i < tsTests.length; i++) {
   const test = tsTests[i];
   console.log(`\n${i + jsTests.length + 1}. Running ${test}...`);
-  
+
   try {
     const { execSync } = await import('child_process');
-    execSync(`npx tsx R:\\Development\\Projects\\swagger-mcp\\tests\\${test}`, { stdio: 'inherit' });
+    execSync(`npx tsx ${path.join(__dirname, test)}`, { stdio: 'inherit' });
     console.log(`\n✅ ${test} completed successfully.`);
   } catch (error: any) {
     console.log(`\n❌ ${test} failed with error: ${error.message}`);

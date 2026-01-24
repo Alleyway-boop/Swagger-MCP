@@ -8,6 +8,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import logger from "./utils/logger.js";
+import { createTransport, getTransportConfig, validateTransportConfig, isTransportModeSupported } from './transport/TransportFactory.js';
 
 // Import tool definitions and handlers
 import { toolDefinitions,
@@ -172,13 +173,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 /**
- * Start the server using stdio transport.
- * This allows the server to communicate via standard input/output streams.
+ * Start the server using configured transport.
+ * This allows the server to communicate via various transport modes (stdio, sse, http).
  */
 async function main() {
-    // Connect using stdio transport
-    const transport = new StdioServerTransport();
-    await server.connect(transport);    
+    // Get transport configuration from environment
+    const transportConfig = getTransportConfig();
+
+    // Validate transport configuration
+    if (!validateTransportConfig(transportConfig)) {
+      logger.error(`Invalid transport configuration: ${JSON.stringify(transportConfig)}`);
+      process.exit(1);
+    }
+
+    // Check if transport mode is supported
+    if (!isTransportModeSupported(transportConfig.mode)) {
+      logger.error(`Transport mode '${transportConfig.mode}' is not yet implemented`);
+      logger.info(`Currently supported modes: stdio`);
+      process.exit(1);
+    }
+
+    // Create and connect the transport
+    const transport = createTransport(transportConfig);
+    await server.connect(transport);
+
+    logger.info(`MCP Server started with ${transportConfig.mode} transport`);
+
+    // For HTTP/SSE transports, we would need to keep the server running
+    // This is a placeholder for future HTTP server setup
+    if (transportConfig.mode === 'http' || transportConfig.mode === 'sse') {
+      logger.info(`HTTP/SSE server would listen on ${transportConfig.host}:${transportConfig.port}${transportConfig.path}`);
+    }
 }
 
 main().catch((error) => {

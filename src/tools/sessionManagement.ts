@@ -1,12 +1,14 @@
 import { SwaggerSearchTool } from '../search/SwaggerSearchTool.js';
 import logger from '../utils/logger.js';
 
+// Global search tool instance
+let searchToolInstance: SwaggerSearchTool | null = null;
+
 function getSearchTool(): SwaggerSearchTool {
-  const { SwaggerSearchTool } = require('../search/SwaggerSearchTool.js');
-  if (!(global as any).searchToolInstance) {
-    (global as any).searchToolInstance = new SwaggerSearchTool();
+  if (!searchToolInstance) {
+    searchToolInstance = new SwaggerSearchTool();
   }
-  return (global as any).searchToolInstance;
+  return searchToolInstance;
 }
 
 // Tool definition for session statistics

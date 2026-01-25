@@ -68,3 +68,28 @@ export interface CacheEntry<T> {
   accessCount: number;
   lastAccessed: number;
 }
+
+/**
+ * Configuration format for .claude/swagger-mcp.json
+ * Used to associate a project with a specific Swagger API
+ */
+export interface ClaudeSwaggerConfig {
+  sessionId: string;
+  swaggerUrl: string;
+  service?: string;          // 微服务名称
+}
+
+/**
+ * Enhanced configuration options for getSwaggerDefinition
+ */
+export interface SwaggerDefinitionOptions {
+  url: string;
+  saveLocation: string;
+  service?: string;          // 微服务名称（用于 swagger-resources 场景）
+  autoDetect?: boolean;      // 启用自动检测（默认：true）
+  autoSession?: boolean;     // 自动创建会话（默认：true）
+  sessionConfig?: {
+    cache_ttl?: number;
+    custom_headers?: Record<string, string>;
+  };
+}

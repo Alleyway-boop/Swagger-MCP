@@ -2,6 +2,7 @@ import axios from 'axios';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
+import yaml from 'js-yaml';
 import { APIIndex, EndpointSummary, SearchResult } from '../config/types.js';
 import logger from '../utils/logger.js';
 
@@ -144,6 +145,7 @@ export class IndexedSwaggerLoader {
 
   /**
    * Load only metadata (not full document) with ETag/Last-Modified capture
+   * Supports both JSON and YAML formats
    */
   private async loadMetadata(
     swaggerUrl: string,
@@ -159,11 +161,29 @@ export class IndexedSwaggerLoader {
         maxRedirects: 5
       });
 
-      const data = response.data;
+      let swaggerData = response.data;
+
+      // Detect and parse YAML format
+      const contentType = response.headers['content-type'] || '';
+      const isYaml = contentType.includes('yaml') ||
+                     contentType.includes('yml') ||
+                     swaggerUrl.endsWith('.yaml') ||
+                     swaggerUrl.endsWith('.yml') ||
+                     (typeof swaggerData === 'string' && !swaggerData.trim().startsWith('{'));
+
+      if (isYaml) {
+        try {
+          swaggerData = yaml.load(swaggerData) as any;
+          logger.debug(`YAML 文档解析成功: ${swaggerUrl}`);
+        } catch (error: any) {
+          logger.error(`YAML 解析失败: ${error.message}`);
+          throw new Error(`无法解析 YAML 文档: ${error.message}`);
+        }
+      }
 
       // Validate Swagger/OpenAPI format
-      if (!data.openapi && !data.swagger) {
-        throw new Error('Invalid Swagger/OpenAPI document');
+      if (!swaggerData.openapi && !swaggerData.swagger) {
+        throw new Error('无效的 Swagger/OpenAPI 文档');
       }
 
       // Capture ETag and Last-Modified headers
@@ -173,7 +193,7 @@ export class IndexedSwaggerLoader {
       // Calculate content hash for integrity verification
       const contentHash = crypto
         .createHash('sha256')
-        .update(JSON.stringify(data))
+        .update(JSON.stringify(swaggerData))
         .digest('hex');
 
       const docMetadata: DocumentMetadata = {
@@ -185,11 +205,11 @@ export class IndexedSwaggerLoader {
       };
 
       const swaggerMetadata: SwaggerMetadata = {
-        info: data.info,
-        servers: data.servers,
-        paths: data.paths || {},
-        components: data.components,
-        definitions: data.definitions
+        info: swaggerData.info,
+        servers: swaggerData.servers,
+        paths: swaggerData.paths || {},
+        components: swaggerData.components,
+        definitions: swaggerData.definitions
       };
 
       return { metadata: swaggerMetadata, docMetadata };

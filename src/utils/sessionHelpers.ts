@@ -9,7 +9,18 @@ import fs from 'fs/promises';
 import path from 'path';
 import { handleDynamicSwaggerConfig } from '../tools/dynamicSwaggerConfig.js';
 import { getSessionConfigManager } from '../config/SessionConfigManager.js';
+import { ClaudeSwaggerConfig } from '../config/types.js';
 import logger from './logger.js';
+
+/**
+ * Path to the new .claude/swagger-mcp.json configuration file
+ */
+const CLAUDE_SWAGGER_CONFIG_PATH = '.claude/swagger-mcp.json';
+
+/**
+ * Path to the legacy .swagger-mcp configuration file
+ */
+const LEGACY_SWAGGER_CONFIG_PATH = '.swagger-mcp';
 
 /**
  * Generate session ID from URL
@@ -88,7 +99,8 @@ export async function deriveSessionFromFile(filePath: string): Promise<string | 
 }
 
 /**
- * Read .swagger-mcp config file
+ * Read Swagger MCP config file
+ * Priority: 1) New .claude/swagger-mcp.json format, 2) Legacy .swagger-mcp format with auto-migration
  */
 export async function readSwaggerMcpConfig(location: string): Promise<{
   sessionId?: string;
@@ -97,8 +109,18 @@ export async function readSwaggerMcpConfig(location: string): Promise<{
   cacheTTL?: number;
   customHeaders?: Record<string, string>;
 } | null> {
+  // Try new format first
+  const newConfig = await readClaudeSwaggerConfig(location);
+  if (newConfig) {
+    return {
+      sessionId: newConfig.sessionId,
+      url: newConfig.swaggerUrl
+    };
+  }
+
+  // Try legacy format
   try {
-    const configPath = path.join(location, '.swagger-mcp');
+    const configPath = path.join(location, LEGACY_SWAGGER_CONFIG_PATH);
     const configContent = await fs.readFile(configPath, 'utf-8');
 
     const result: any = {};
@@ -135,6 +157,20 @@ export async function readSwaggerMcpConfig(location: string): Promise<{
       }
     }
 
+    // Auto-migrate if we have session ID and URL
+    if (result.sessionId && result.url) {
+      logger.info(`Auto-migrating legacy config to new format`);
+      await writeClaudeSwaggerConfig(location, result.sessionId, result.url);
+
+      // Delete legacy config after successful migration
+      try {
+        await fs.unlink(configPath);
+        logger.info(`Deleted legacy ${LEGACY_SWAGGER_CONFIG_PATH} after migration`);
+      } catch (error) {
+        logger.warn(`Could not delete legacy config: ${error}`);
+      }
+    }
+
     return result;
   } catch (error) {
     logger.debug(`Could not read .swagger-mcp config: ${error}`);
@@ -143,7 +179,7 @@ export async function readSwaggerMcpConfig(location: string): Promise<{
 }
 
 /**
- * Create or update .swagger-mcp config file
+ * Create or update Swagger MCP config file (new .claude/swagger-mcp.json format)
  */
 export async function createSwaggerMcpConfig(
   location: string,
@@ -155,24 +191,10 @@ export async function createSwaggerMcpConfig(
     filePath?: string;
   }
 ): Promise<void> {
-  const configPath = path.join(location, '.swagger-mcp');
-
-  const lines = [
-    `# Swagger MCP Configuration`,
-    `# Generated: ${new Date().toISOString()}`,
-    `# Auto-managed session - do not edit manually`,
-    ``,
-    `SWAGGER_SESSION_ID=${sessionId}`,
-    url ? `SWAGGER_URL=${url}` : '',
-    options?.cache_ttl ? `CACHE_TTL=${options.cache_ttl}` : '',
-    options?.custom_headers ? `CUSTOM_HEADERS=${JSON.stringify(options.custom_headers)}` : '',
-    ``,
-    `# Legacy file path (for backward compatibility)`,
-    options?.filePath ? `SWAGGER_FILEPATH=${options.filePath}` : `# SWAGGER_FILEPATH=<will-be-set-on-first-use>`
-  ].filter(Boolean).join('\n');
-
-  await fs.writeFile(configPath, lines);
-  logger.info(`Created/updated .swagger-mcp config at ${configPath}`);
+  // Use new format
+  if (url) {
+    await writeClaudeSwaggerConfig(location, sessionId, url);
+  }
 }
 
 /**
@@ -239,4 +261,94 @@ export function listActiveSessions(): Array<{
   // For now, return empty array as placeholder
 
   return sessions;
+}
+
+/**
+ * Read .claude/swagger-mcp.json config file (new format)
+ */
+export async function readClaudeSwaggerConfig(projectRoot: string): Promise<ClaudeSwaggerConfig | null> {
+  try {
+    const configPath = path.join(projectRoot, CLAUDE_SWAGGER_CONFIG_PATH);
+    const configContent = await fs.readFile(configPath, 'utf-8');
+    const config = JSON.parse(configContent) as ClaudeSwaggerConfig;
+
+    // Validate required fields
+    if (!config.sessionId || !config.swaggerUrl) {
+      logger.warn(`Invalid ${CLAUDE_SWAGGER_CONFIG_PATH}: missing required fields`);
+      return null;
+    }
+
+    return config;
+  } catch (error) {
+    logger.debug(`Could not read ${CLAUDE_SWAGGER_CONFIG_PATH}: ${error}`);
+    return null;
+  }
+}
+
+/**
+ * Write .claude/swagger-mcp.json config file (new format)
+ */
+export async function writeClaudeSwaggerConfig(
+  projectRoot: string,
+  sessionId: string,
+  swaggerUrl: string
+): Promise<void> {
+  const configPath = path.join(projectRoot, CLAUDE_SWAGGER_CONFIG_PATH);
+  const claudeDir = path.join(projectRoot, '.claude');
+
+  // Ensure .claude directory exists
+  await fs.mkdir(claudeDir, { recursive: true });
+
+  const config: ClaudeSwaggerConfig = {
+    sessionId,
+    swaggerUrl
+  };
+
+  await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+  logger.info(`Created ${CLAUDE_SWAGGER_CONFIG_PATH} at ${configPath}`);
+}
+
+/**
+ * Migrate legacy .swagger-mcp config to new .claude/swagger-mcp.json format
+ * @returns true if migration was performed, false otherwise
+ */
+export async function migrateLegacyConfig(projectRoot: string): Promise<boolean> {
+  try {
+    const legacyConfigPath = path.join(projectRoot, LEGACY_SWAGGER_CONFIG_PATH);
+
+    // Check if legacy config exists
+    try {
+      await fs.access(legacyConfigPath);
+    } catch {
+      // No legacy config to migrate
+      return false;
+    }
+
+    // Read legacy config
+    const legacyContent = await fs.readFile(legacyConfigPath, 'utf-8');
+
+    // Parse session ID from legacy config
+    const sessionMatch = legacyContent.match(/SWAGGER_SESSION_ID=([^\s\n]+)/);
+    const urlMatch = legacyContent.match(/SWAGGER_URL=([^\s\n]+)/);
+
+    if (!sessionMatch || !urlMatch) {
+      logger.warn(`Legacy config found but missing required fields`);
+      return false;
+    }
+
+    const sessionId = sessionMatch[1].trim();
+    const swaggerUrl = urlMatch[1].trim();
+
+    // Write new config
+    await writeClaudeSwaggerConfig(projectRoot, sessionId, swaggerUrl);
+
+    // Delete legacy config
+    await fs.unlink(legacyConfigPath);
+    logger.info(`Migrated and deleted legacy ${LEGACY_SWAGGER_CONFIG_PATH}`);
+
+    return true;
+  } catch (error) {
+    logger.error(`Error migrating legacy config: ${error}`);
+    return false;
+  }
 }

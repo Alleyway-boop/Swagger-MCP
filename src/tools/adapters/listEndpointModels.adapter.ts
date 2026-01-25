@@ -6,6 +6,7 @@
  */
 
 import fs from 'fs/promises';
+import path from 'path';
 import { SwaggerSearchTool } from '../../search/SwaggerSearchTool.js';
 import { getSessionConfigManager } from '../../config/SessionConfigManager.js';
 import logger from '../../utils/logger.js';
@@ -25,8 +26,6 @@ function getSearchTool(): SwaggerSearchTool {
  */
 async function readSessionFromConfig(swaggerFilePath: string): Promise<string | null> {
   try {
-    const path = require('path');
-    const fs = require('fs/promises');
     const configPath = path.join(path.dirname(swaggerFilePath), '.swagger-mcp');
     const configContent = await fs.readFile(configPath, 'utf-8');
 

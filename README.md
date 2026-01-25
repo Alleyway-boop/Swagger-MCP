@@ -124,12 +124,67 @@ The Swagger MCP tools will now be available to the Cursor Agent in Composer.
 
 ### Available MCP Tools
 
-#### **Original Tools** (Preserved)
-- `getSwaggerDefinition`: Downloads a Swagger definition from a URL
+#### **Original Tools** (Enhanced)
+- **`getSwaggerDefinition`**: Downloads a Swagger definition from a URL
+  - **New Features** (v2.1+):
+    - 🌐 **Microservices Support**: Auto-detects Spring Boot `/swagger-resources` endpoint
+    - 🔍 **URL Auto-Detection**: Automatically finds Swagger/OpenAPI docs at common paths
+    - 📄 **YAML Format Support**: Parses both JSON and YAML Swagger documents
+    - 🔑 **Custom Headers**: Built-in support for authenticated APIs
+  ```json
+  {
+    "url": "https://api-gateway.example.com",
+    "saveLocation": "./",
+    "service": "auth-service",
+    "autoDetect": true,
+    "sessionConfig": {
+      "custom_headers": { "Authorization": "Bearer token" }
+    }
+  }
+  ```
 - `listEndpoints`: Lists all endpoints from the Swagger definition
 - `listEndpointModels`: Lists all models used by a specific endpoint
 - `generateModelCode`: Generates TypeScript code for a model
 - `generateEndpointToolCode`: Generates TypeScript code for an MCP tool definition
+
+#### **Microservices Architecture Support**
+
+For Spring Boot microservices using `/swagger-resources`:
+
+1. **Step 1**: Get available services
+```json
+{
+  "tool": "getSwaggerDefinition",
+  "arguments": {
+    "url": "https://api-gateway.example.com",
+    "saveLocation": "./"
+  }
+}
+```
+**Response**: Lists all available microservices
+
+2. **Step 2**: Get specific service documentation
+```json
+{
+  "tool": "getSwaggerDefinition",
+  "arguments": {
+    "url": "https://api-gateway.example.com",
+    "saveLocation": "./",
+    "service": "auth-service"
+  }
+}
+```
+
+#### **URL Auto-Detection**
+
+The tool automatically tries common Swagger paths:
+- `/swagger.json`, `/swagger.yaml`
+- `/openapi.json`, `/openapi.yaml`
+- `/api-docs`, `/api-docs/swagger.json`
+- `/docs/api`, `/v1/swagger.json`
+- And 10+ more common paths
+
+If direct URL fails, it attempts these paths automatically.
 
 #### **New High-Performance Tools**
 - **`configure_swagger_session`**: Dynamic session configuration without environment variables
@@ -214,15 +269,18 @@ The prompt will return a series of messages that guide the AI assistant through 
 
 ## Setting Up Your New Project
 
-First ask the agent to get the Swagger file, make sure you give it the URL for the swagger file, or at least a way to find it for you, this will download the file and save it locally with a hashed filename, this filename will automatically be added to a `.swagger-mcp` settings file in the root of your current solution.
+First ask the agent to get the Swagger file, make sure you give it the URL for the swagger file, or at least a way to find it for you, this will download the file and save it locally with a hashed filename, this filename will automatically be added to a `.claude/swagger-mcp.json` settings file in the `.claude` folder of your current solution.
 
-## Auto generated .swagger-mcp config file
+## Auto generated .claude/swagger-mcp.json config file
 
+```json
+{
+  "sessionId": "session_abc123...",
+  "swaggerUrl": "https://api.example.com/swagger.json"
+}
 ```
-SWAGGER_FILENAME = TheFilenameOfTheLocallyStoredSwaggerFile
-```
 
-This simple configuration file associates your current project with a specific Swagger API, we may use it to store more details in the future.
+This JSON configuration file associates your current project with a specific Swagger API.
 
 Once configured, the MCP will be able to find your Swagger definition and associate it with your current solution, reducing the number of API calls needed to get the project and tasks related to the solution you are working on.
 
@@ -343,6 +401,128 @@ Based on extensive testing, here are the performance improvements you can expect
     "session_id": "my-project-api"
   }
 }
+```
+
+## 💡 Token Usage Guidelines
+
+### Overview
+
+This MCP server is designed to minimize token usage while providing comprehensive API exploration capabilities. Understanding token costs helps optimize your workflows.
+
+### Tool Token Costs
+
+| Tool | Typical Response | Token Cost | Risk Level |
+|------|-----------------|------------|------------|
+| `search_swagger_endpoints` | 10-20 results | ~1,000-2,000 | 🟢 Low |
+| `get_endpoint_details` | 1-5 endpoints | ~1,000-3,000 | 🟡 Medium |
+| `listEndpoints` (summary=true) | 50 endpoints | ~400-600 | 🟢 Low |
+| `listEndpoints` (summary=false) | 50 endpoints | ~1,000-1,500 | 🟡 Medium |
+| `get_session_stats` | Session info | ~500-1,000 | 🟢 Low |
+| `get_search_suggestions` | 5-10 suggestions | ~500-800 | 🟢 Low |
+| `generateEndpointToolCode` | Tool code | ~1,000-3,000 | 🟡 Medium |
+
+### Best Practices
+
+#### 1. For Large APIs (100+ Endpoints)
+
+**❌ Avoid:**
+```javascript
+// Getting all endpoints at once - HIGH TOKEN COST
+listEndpoints({ swaggerFilePath, limit: 1000 })
+```
+
+**✅ Recommended:**
+```javascript
+// Step 1: Get overview in summary mode
+listEndpoints({ swaggerFilePath, summary: true, limit: 100 })
+
+// Step 2: Use search for specific endpoints
+search_swagger_endpoints({
+  swagger_url,
+  session_id,
+  search_type: "keywords",
+  query: "user management",
+  limit: 20
+})
+
+// Step 3: Get details only for needed endpoints
+get_endpoint_details({
+  swagger_url,
+  session_id,
+  endpoint_paths: ["/users/{id}", "/users/create"],
+  methods: ["GET"]
+})
+```
+
+#### 2. Use Sub-Agents for Complex Tasks
+
+For comprehensive API analysis, delegate to a sub-agent with specific instructions:
+
+```javascript
+// Main context: Get overview
+const overview = await listEndpoints({
+  swaggerFilePath,
+  summary: true,
+  limit: 50
+});
+
+// Sub-agent: Detailed analysis with filtered results
+await analyzeEndpoints({
+  task: "Find authentication-related endpoints",
+  useSubAgent: true,
+  filter: { tags: ["auth", "security"] }
+});
+```
+
+#### 3. Pagination Strategy
+
+```javascript
+// Page through large APIs efficiently
+const pageSize = 50;
+let offset = 0;
+
+while (true) {
+  const page = await listEndpoints({
+    swaggerFilePath,
+    summary: true,
+    limit: pageSize,
+    offset
+  });
+
+  if (page.endpoints.length === 0) break;
+
+  // Process page...
+  offset += pageSize;
+}
+```
+
+### Token Optimization Tips
+
+| Strategy | Token Savings | Use Case |
+|----------|---------------|----------|
+| Use `summary=true` | 70-80% | Quick API overview |
+| Set `limit` parameter | Proportional | Large APIs |
+| Use search instead of list | 50-90% | Targeted discovery |
+| Sub-agent delegation | 90%+ | Complex analysis |
+| Pagination control | Variable | Progressive loading |
+
+### Example Workflows
+
+#### Workflow 1: Quick API Overview (~500 tokens)
+```javascript
+1. listEndpoints({ summary: true, limit: 50 })  // ~400 tokens
+```
+
+#### Workflow 2: Targeted Endpoint Discovery (~1,500 tokens)
+```javascript
+1. search_swagger_endpoints({ query: "user auth", limit: 10 })  // ~1,000 tokens
+2. get_endpoint_details({ endpoint_paths: ["/auth/login"] })    // ~500 tokens
+```
+
+#### Workflow 3: Comprehensive Analysis (sub-agent, ~2,000 tokens in main)
+```javascript
+1. listEndpoints({ summary: true, limit: 100 })  // ~600 tokens
+2. Delegate to sub-agent for detailed analysis    // ~1,400 tokens in sub-agent
 ```
 
 ## 🏢 Use Cases

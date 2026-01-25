@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { IndexedSwaggerLoader } from '../cache/IndexedSwaggerLoader.js';
 import { LightweightAPIRetriever } from './LightweightAPIRetriever.js';
 import { createCache, getCacheManager } from '../cache/MemoryOptimizedCache.js';
@@ -374,7 +375,6 @@ export class SwaggerSearchTool {
    * Generate index key
    */
   private generateIndexKey(swaggerUrl: string, sessionId: string): string {
-    const crypto = require('crypto');
     const urlHash = crypto.createHash('sha256').update(swaggerUrl).digest('hex').substring(0, 16);
     return `${urlHash}_${sessionId}`;
   }

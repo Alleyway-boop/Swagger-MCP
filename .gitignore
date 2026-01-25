@@ -40,7 +40,11 @@ Thumbs.db
 # Ignore the build folder.
 ReferenceFiles/
 
+# Swagger MCP Configuration (legacy format)
 .swagger-mcp
+
+# Swagger MCP Configuration (new format)
+.claude/swagger-mcp.json
 
 # Test generated files
 tests/generated/

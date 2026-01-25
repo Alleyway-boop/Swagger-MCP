@@ -54,3 +54,7 @@ test.json
 
 # Ignore my todo notepad file
 TodoNotepad
+
+.claude/
+
+.swagger-cache/
